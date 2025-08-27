@@ -1,0 +1,660 @@
+<!-- frontend/index.html (前端渲染客户端) -->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SimVerse Engine - 实时模拟</title>
+    <style>
+        body {
+            background-color: #1a1a2e;
+            color: #e0e0e0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            overflow: hidden;
+        }
+        #container {
+            width: 1280px;
+            padding: 20px;
+            background-color: #2e2e4f;
+            border-radius: 16px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        }
+        #header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding: 0 10px;
+        }
+        #header h1 {
+            font-size: 24px;
+            margin: 0;
+            display: flex;
+            align-items: center;
+        }
+        #header h1 span { margin-left: 10px; }
+        #connection-status {
+            display: flex;
+            align-items: center;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 14px;
+        }
+        .status-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+        .connected {
+            background-color: rgba(3, 201, 136, 0.1);
+            color: #03c988;
+        }
+        .connected .status-dot { background-color: #03c988; }
+        .disconnected {
+            background-color: rgba(220, 53, 69, 0.1);
+            color: #dc3545;
+        }
+        .disconnected .status-dot { background-color: #dc3545; }
+        
+        /* 游戏场景核心样式 */
+        #scene {
+            position: relative;
+            width: 1280px; /* 将会被背景图实际尺寸覆盖 */
+            height: 720px;  /* 将会被背景图实际尺寸覆盖 */
+            background-image: url('../assets/game-map.png'); /* 引用背景图 */
+            background-size: cover;
+            border-radius: 8px;
+            overflow: hidden; /* 防止NPC移出边界 */
+            box-shadow: inset 0 0 20px rgba(0, 0, 0, 0.5);
+            border: 1px solid #4a4a70;
+        }
+        /* NPC通用样式 */
+        .npc {
+            position: absolute;
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: white;
+            font-weight: bold;
+            font-size: 24px;
+            /* 移除CSS transition，改用JavaScript精确控制动画 */
+            box-shadow: 0 0 15px rgba(0,0,0,0.5);
+            /* 确保头像图片在圆形区域内完美显示 */
+            overflow: hidden;
+        }
+        .npc-label {
+            position: absolute;
+            bottom: -20px; /* 标签在图标下方 */
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            font-size: 12px;
+            padding: 2px 6px;
+            border-radius: 4px;
+            white-space: nowrap; /* 防止标签换行 */
+        }
+
+        /* 不同类型NPC的样式 - 增强视觉辨识度 */
+        .player { 
+            background: linear-gradient(135deg, #03a9f4, #0288d1); 
+            border: 3px solid #90caf9; 
+            box-shadow: 0 0 20px rgba(3, 169, 244, 0.6);
+        }
+        .guard { 
+            background: linear-gradient(135deg, #e53935, #c62828); 
+            border: 3px solid #ef9a9a; 
+            box-shadow: 0 0 20px rgba(229, 57, 53, 0.6);
+        }
+        .npc { 
+            background: linear-gradient(135deg, #fb8c00, #ef6c00); 
+            border: 3px solid #ffcc80; 
+            box-shadow: 0 0 20px rgba(251, 140, 0, 0.6);
+        }
+        /* NPC头像图片样式 */
+        .npc-avatar {
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            object-fit: cover;
+            pointer-events: none;
+            /* 确保图片在圆形容器中完美居中显示 */
+            display: block;
+            /* 添加轻微的缩放以确保头像完全填充圆形 */
+            transform: scale(1.1);
+            /* 平滑过渡效果 */
+            transition: transform 0.3s ease;
+        }
+
+        /* NPC选中状态样式 */
+        .npc.selected {
+            transform: scale(1.2);
+            z-index: 1000;
+            box-shadow: 0 0 30px rgba(255, 255, 255, 0.8);
+            animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+            0% {
+                box-shadow: 0 0 20px rgba(255, 255, 255, 0.8);
+            }
+            50% {
+                box-shadow: 0 0 40px rgba(255, 255, 255, 1);
+            }
+            100% {
+                box-shadow: 0 0 20px rgba(255, 255, 255, 0.8);
+            }
+        }
+
+        /* NPC移动状态样式 */
+        .npc[data-state="walking"] {
+            opacity: 0.8;
+            filter: brightness(1.2);
+        }
+
+        /* 场景点击提示样式 */
+        #scene {
+            cursor: crosshair;
+        }
+
+        #scene.no-selection {
+            cursor: default;
+        }
+
+        /* 操作提示样式 */
+        .instructions {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 10px;
+            border-radius: 5px;
+            font-size: 14px;
+            z-index: 100;
+        }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <div id="header">
+            <h1><span>🎮 SimVerse 实时模拟</span></h1>
+            <div id="connection-status" class="disconnected">
+                <div class="status-dot"></div>
+                <span id="status-text">连接中...</span>
+            </div>
+        </div>
+        <!-- 游戏场景渲染区 -->
+        <div id="scene">
+            <div class="instructions">
+                🎮 <strong>交互式控制器</strong><br>
+                1. 点击一个NPC进行选中<br>
+                2. 点击地图任意位置移动NPC<br>
+                3. 再次点击NPC可取消选中
+            </div>
+        </div>
+    </div>
+    <script>
+        // 调试模式配置 - 设置为true以启用详细日志
+        window.DEBUG_MODE = false;
+        
+        document.addEventListener('DOMContentLoaded', () => {
+            const scene = document.getElementById('scene');
+            const connectionStatus = document.getElementById('connection-status');
+            const statusText = document.getElementById('status-text');
+            const npcElements = {}; // 存储NPC的DOM元素
+            let ws = null; // WebSocket连接
+            let clientId = null; // 客户端ID
+            let selectedNpcId = null; // 当前选中的NPC ID
+
+            // --- 动态设置场景尺寸 ---
+            const mapImage = new Image();
+            mapImage.src = '../assets/game-map.png';
+            mapImage.onload = () => {
+                scene.style.width = `${mapImage.width}px`;
+                scene.style.height = `${mapImage.height}px`;
+                // 根据新尺寸调整外层容器
+                document.getElementById('container').style.width = `${mapImage.width + 40}px`;
+            };
+            mapImage.onerror = () => {
+              console.error("背景图片加载失败，请确保 ../assets/game-map.png 路径正确。将使用默认尺寸 1280x720。");
+              document.getElementById('container').style.width = '1280px';
+            };
+
+            // NPC ID到头像文件的映射
+            const npcAvatarMap = {
+                'npc_1': '../assets/player1.png',
+                'npc_2': '../assets/player2.png',
+                'npc_3': '../assets/guard.png',
+                'npc_4': '../assets/merchant.png',
+                'npc_5': '../assets/guide.png'
+            };
+
+            // NPC移动状态管理
+            const npcMovementStates = {};
+            
+            // 移动速度：每秒移动的像素数（与后端保持一致）
+            const MOVEMENT_SPEED = 100;
+
+            // === 交互式控制器核心功能 ===
+            
+            /**
+             * 处理场景点击事件
+             * @param {MouseEvent} event - 鼠标点击事件
+             */
+            async function handleSceneClick(event) {
+                // 如果没有选中的NPC，不处理点击
+                if (!selectedNpcId) {
+                    return;
+                }
+
+                // 获取点击位置相对于场景的坐标
+                const rect = scene.getBoundingClientRect();
+                const x = event.clientX - rect.left;
+                const y = event.clientY - rect.top;
+
+                try {
+                    // 发送交互式移动指令到后端
+                    const moveCommand = {
+                        npc_id: selectedNpcId,
+                        target_x: Math.round(x),
+                        target_y: Math.round(y)
+                    };
+
+                    const response = await fetch('http://localhost:8000/command/interactive_move', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify(moveCommand)
+                    });
+
+                    const result = await response.json();
+
+                    if (response.ok) {
+                        // 取消NPC选中状态
+                        deselectNpc();
+                    } else {
+                        // 显示错误信息
+                        alert(`移动失败: ${result.message}`);
+                    }
+                } catch (error) {
+                    console.error('❌ 发送移动指令时发生错误:', error);
+                    // 显示更详细的错误信息
+                    let errorMessage = '发送移动指令失败';
+                    if (error.name === 'TypeError') {
+                        errorMessage += ': 网络连接问题或服务器无响应';
+                    } else if (error.name === 'AbortError') {
+                        errorMessage += ': 请求超时';
+                    } else {
+                        errorMessage += `: ${error.message}`;
+                    }
+                    alert(errorMessage);
+                }
+            }
+
+            /**
+             * 处理NPC点击事件
+             * @param {string} npcId - NPC的ID
+             * @param {MouseEvent} event - 鼠标点击事件
+             */
+            function handleNpcClick(npcId, event) {
+                event.stopPropagation(); // 阻止事件冒泡到场景
+                
+                const npc = window.GAME_STATE[npcId];
+                if (!npc) {
+                    console.warn(`❌ NPC ${npcId} 不存在于游戏状态中`);
+                    return;
+                }
+
+                // 如果NPC正在移动中，不允许选中
+                if (npc.state === 'walking') {
+                    console.log(`⏳ NPC ${npc.name} 正在移动中，无法选中`);
+                    return;
+                }
+
+                // 如果点击的是已选中的NPC，则取消选中
+                if (selectedNpcId === npcId) {
+                    deselectNpc();
+                    return;
+                }
+
+                // 取消之前的选中状态
+                deselectNpc();
+                
+                // 选中新NPC
+                selectedNpcId = npcId;
+                const npcElement = npcElements[npcId];
+                if (npcElement) {
+                    npcElement.classList.add('selected');
+                    npcElement.style.transform = 'scale(1.2)';
+                    npcElement.style.zIndex = '1000';
+                    // 改变场景光标样式，表示可以点击移动
+                    scene.classList.remove('no-selection');
+                    // 记录选中状态（用于调试）
+                    if (window.DEBUG_MODE) {
+                        console.log(`✅ 已选中NPC: ${npc.name} (${npcId})`);
+                    }
+                }
+            }
+
+            /**
+             * 取消NPC选中状态
+             */
+            function deselectNpc() {
+                if (selectedNpcId) {
+                    const npcElement = npcElements[selectedNpcId];
+                    if (npcElement) {
+                        npcElement.classList.remove('selected');
+                        npcElement.style.transform = 'scale(1)';
+                        npcElement.style.zIndex = '';
+                    }
+                    // 记录取消选中状态（用于调试）
+                    if (window.DEBUG_MODE) {
+                        console.log(`❌ 已取消选中NPC: ${selectedNpcId}`);
+                    }
+                    selectedNpcId = null;
+                    // 恢复场景默认光标
+                    scene.classList.add('no-selection');
+                }
+            }
+
+            /**
+             * 连接WebSocket服务器
+             */
+            function connectWebSocket() {
+                ws = new WebSocket('ws://localhost:8000/ws');
+
+                ws.onopen = () => {
+                    // 记录连接成功（用于调试）
+                    if (window.DEBUG_MODE) {
+                        console.log('成功连接到SimVerse后端！');
+                    }
+                    connectionStatus.classList.remove('disconnected');
+                    connectionStatus.classList.add('connected');
+                    statusText.textContent = '已连接';
+                };
+
+                ws.onmessage = (event) => {
+                    const message = JSON.parse(event.data);
+                    handleWebSocketMessage(message);
+                };
+
+                ws.onclose = () => {
+                    // 记录连接断开（用于调试）
+                    if (window.DEBUG_MODE) {
+                        console.log('与后端的连接已断开，将在3秒后尝试重连...');
+                    }
+                    connectionStatus.classList.remove('connected');
+                    connectionStatus.classList.add('disconnected');
+                    statusText.textContent = '已断开';
+                    setTimeout(connectWebSocket, 3000);
+                };
+
+                ws.onerror = (error) => {
+                    console.error('WebSocket 发生错误:', error);
+                    ws.close();
+                };
+            }
+
+            /**
+             * 处理来自后端的WebSocket消息
+             * @param {Object} message - 接收到的消息对象
+             */
+            function handleWebSocketMessage(message) {
+                // 处理连接建立消息
+                if (message.action === 'connection_established') {
+                    clientId = message.client_id;
+                    // 记录连接信息（用于调试）
+                    if (window.DEBUG_MODE) {
+                        console.log(`🔗 连接已建立，客户端ID: ${clientId}`);
+                    }
+                    // 更新游戏状态
+                    if (message.game_state) {
+                        window.GAME_STATE = message.game_state;
+                        updateScene(message.game_state);
+                    }
+                }
+                // 处理路径移动指令
+                else if (message.action === 'move_along_path') {
+                    const { npc_id, path } = message.data;
+                    executePathMovement(npc_id, path);
+                }
+                // 处理状态更新
+                else if (message.action === 'state_update') {
+                    updateScene(message.data);
+                }
+                // 处理初始游戏状态（兼容旧格式）
+                else if (typeof message === 'object' && message.npc_1) {
+                    window.GAME_STATE = message;
+                    updateScene(message);
+                }
+            }
+
+            /**
+             * 执行NPC路径移动
+             * @param {string} npcId - NPC的ID
+             * @param {Array} path - 路径点数组
+             */
+            async function executePathMovement(npcId, path) {
+                const npcElement = npcElements[npcId];
+                if (!npcElement) {
+                    console.warn(`❌ NPC元素 ${npcId} 不存在，无法执行移动`);
+                    return;
+                }
+
+                // 设置NPC移动状态
+                npcMovementStates[npcId] = true;
+                npcElement.isMoving = true;
+                
+                // 如果移动的NPC是当前选中的NPC，取消选中
+                if (selectedNpcId === npcId) {
+                    deselectNpc();
+                }
+
+                try {
+                    // 执行路径动画
+                    await animatePath(npcId, path);
+                    console.log(`✅ NPC ${npcId} 路径移动完成`);
+                } catch (error) {
+                    console.error(`❌ NPC ${npcId} 路径移动失败:`, error);
+                } finally {
+                    // 恢复NPC移动状态
+                    npcMovementStates[npcId] = false;
+                    npcElement.isMoving = false;
+                }
+            }
+
+            /**
+             * 使用Promise和setTimeout实现精确的动画控制
+             * @param {HTMLElement} element - 要移动的DOM元素
+             * @param {number} targetX - 目标X坐标
+             * @param {number} targetY - 目标Y坐标
+             * @param {number} duration - 动画持续时间（毫秒）
+             * @returns {Promise} 动画完成的Promise
+             */
+            function animateMovement(element, targetX, targetY, duration) {
+                return new Promise((resolve) => {
+                    const startX = parseFloat(element.style.left) || 0;
+                    const startY = parseFloat(element.style.top) || 0;
+                    const startTime = Date.now();
+                    
+                    function updatePosition() {
+                        const elapsed = Date.now() - startTime;
+                        const progress = Math.min(elapsed / duration, 1);
+                        
+                        // 使用线性插值计算当前位置
+                        const currentX = startX + (targetX - startX) * progress;
+                        const currentY = startY + (targetY - startY) * progress;
+                        
+                        // 更新元素位置
+                        element.style.left = `${currentX}px`;
+                        element.style.top = `${currentY}px`;
+                        
+                        if (progress < 1) {
+                            // 继续动画
+                            requestAnimationFrame(updatePosition);
+                        } else {
+                            // 动画完成
+                            resolve();
+                        }
+                    }
+                    
+                    updatePosition();
+                });
+            }
+
+            /**
+             * 让NPC沿着路径点移动的动画函数
+             * @param {string} npcId - NPC的ID
+             * @param {Array} path - 路径点数组，每个点包含x和y坐标
+             * @returns {Promise} 所有移动完成后的Promise
+             */
+            async function animatePath(npcId, path) {
+                const npcElement = npcElements[npcId];
+                if (!npcElement) {
+                    console.warn(`❌ NPC元素 ${npcId} 不存在，无法执行动画`);
+                    return;
+                }
+                
+                try {
+                    // 逐个移动到每个路径点
+                    for (let i = 0; i < path.length; i++) {
+                        const waypoint = path[i];
+                        const targetX = waypoint.x - 25; // 减去NPC宽度的一半，使中心对准
+                        const targetY = waypoint.y - 25; // 减去NPC高度的一半，使中心对准
+                        
+                        // 获取当前位置
+                        const currentX = parseFloat(npcElement.style.left) || 0;
+                        const currentY = parseFloat(npcElement.style.top) || 0;
+                        
+                        // 计算移动距离
+                        const distance = Math.sqrt(
+                            Math.pow(targetX - currentX, 2) + Math.pow(targetY - currentY, 2)
+                        );
+                        
+                        // 根据距离和速度计算动画时长
+                        const duration = (distance / MOVEMENT_SPEED) * 1000; // 转换为毫秒
+                        
+                        if (distance > 0) {
+                            // 执行移动动画
+                            await animateMovement(npcElement, targetX, targetY, duration);
+                        }
+                    }
+                    
+                    // 发送移动完成信号到后端
+                    if (ws && ws.readyState === WebSocket.OPEN) {
+                        const completeMessage = {
+                            event: "move_complete",
+                            npc_id: npcId
+                        };
+                        ws.send(JSON.stringify(completeMessage));
+                    }
+                    
+                } catch (error) {
+                    console.error(`❌ NPC ${npcId} 路径动画执行失败:`, error);
+                    // 即使动画失败，也要发送完成信号，避免NPC状态卡住
+                    if (ws && ws.readyState === WebSocket.OPEN) {
+                        const completeMessage = {
+                            event: "move_complete",
+                            npc_id: npcId
+                        };
+                        ws.send(JSON.stringify(completeMessage));
+                    }
+                }
+            }
+
+            /**
+             * 更新游戏场景
+             * @param {Object} gameState - 游戏状态对象
+             */
+            function updateScene(gameState) {
+                // 更新全局游戏状态
+                window.GAME_STATE = gameState;
+                
+                // 遍历后端发来的所有NPC状态
+                for (const npcId in gameState) {
+                    const npcState = gameState[npcId];
+                    let npcElement = npcElements[npcId];
+
+                    // 如果场景中还没有这个NPC的元素，就创建一个
+                    if (!npcElement) {
+                        npcElement = document.createElement('div');
+                        npcElement.id = npcId;
+                        npcElement.classList.add('npc', npcState.type);
+                        npcElement.isMoving = false; // 初始化移动状态
+                        
+                        // 创建头像图片元素
+                        const avatar = document.createElement('img');
+                        avatar.classList.add('npc-avatar');
+                        avatar.src = npcAvatarMap[npcId] || '../assets/player1.png'; // 默认头像
+                        avatar.alt = npcState.name;
+                        
+                        // 创建名称标签
+                        const label = document.createElement('span');
+                        label.classList.add('npc-label');
+                        label.textContent = npcState.name;
+                        
+                        // 将头像和标签添加到NPC元素中
+                        npcElement.appendChild(avatar);
+                        npcElement.appendChild(label);
+                        scene.appendChild(npcElement);
+                        npcElements[npcId] = npcElement;
+                        
+                        // 初始化移动状态
+                        npcMovementStates[npcId] = false;
+                        
+                        // 设置初始位置（减去NPC尺寸的一半，使中心对准）
+                        npcElement.style.left = `${npcState.x - 25}px`;
+                        npcElement.style.top = `${npcState.y - 25}px`;
+                        
+                        // 添加NPC点击事件
+                        npcElement.addEventListener('click', (e) => handleNpcClick(npcId, e));
+                        
+                        // 添加CSS样式过渡效果
+                        npcElement.style.transition = 'transform 0.2s ease';
+                    }
+                    
+                    // 只有在idle状态下才同步位置（walking状态下的位置由动画控制）
+                    if (npcState.state === 'idle' && !npcMovementStates[npcId]) {
+                        // 同步位置（减去NPC尺寸的一半，使中心对准）
+                        npcElement.style.left = `${npcState.x - 25}px`;
+                        npcElement.style.top = `${npcState.y - 25}px`;
+                    }
+                    
+                    // 更新移动状态标识（用于调试显示）
+                    npcElement.dataset.state = npcState.state;
+                    
+                    // 根据状态更新NPC外观
+                    if (npcState.state === 'walking') {
+                        npcElement.style.opacity = '0.8';
+                        npcElement.style.filter = 'brightness(1.2)';
+                    } else {
+                        npcElement.style.opacity = '1';
+                        npcElement.style.filter = 'brightness(1)';
+                    }
+                }
+            }
+
+            // 添加场景点击事件
+            scene.addEventListener('click', handleSceneClick);
+
+            // 初始化场景光标样式
+            scene.classList.add('no-selection');
+
+            // 初始化游戏状态
+            window.GAME_STATE = {};
+
+            // 启动WebSocket连接
+            connectWebSocket();
+        });
+    </script>
+</body>
+</html>
