@@ -48,7 +48,7 @@ SimVerse-Engine/
 
 1. **克隆项目**
    ```bash
-   git clone <repository-url>
+   git clone https://github.com/SolidFoundry/SimVerse-Engine.git
    cd SimVerse-Engine
    ```
 
